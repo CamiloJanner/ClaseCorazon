@@ -1,9 +1,7 @@
 import streamlit as st
 import joblib
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
+import numpy as np
 
 # Cargar el modelo y el escalador
 modelo_knn = joblib.load('modelo_knn.bin')
@@ -30,13 +28,13 @@ with tabs[0]:
     edad = st.slider("Edad", 18, 80, 40)
     colesterol = st.slider("Colesterol", 50, 600, 200)
 
-    st.write("Por favor, ajuste los valores en los deslizadores para introducir los datos de la persona.")
+    st.write("Ajuste los valores en los deslizadores para introducir los datos de la persona.")
 
 # Predicción (tab 2)
 with tabs[1]:
     st.header("Predicción")
     
-    # Si el botón de predecir es presionado
+    # Botón para hacer la predicción
     if st.button('Predecir'):
         # Crear el dataframe con los datos de entrada y asegurarse de que las columnas son las correctas
         datos_entrada = pd.DataFrame([[edad, colesterol]], columns=['edad', 'colesterol'])
