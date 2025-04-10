@@ -1,3 +1,5 @@
 scikit-learn
 streamlit
 pandas
+ultralytics
+opencv-python-headless
