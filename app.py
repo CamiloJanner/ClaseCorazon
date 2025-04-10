@@ -1,108 +1,146 @@
 import streamlit as st
-import tensorflow as tf
+from PIL import Image
+import cv2
 import numpy as np
 import os
-import random
-import pickle
+from ultralytics import YOLO
+import tempfile
 import requests
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from deep_translator import GoogleTranslator
 
-# IDs de los archivos en Google Drive
-MODEL_ID = "1ooYFg0KB5zVT3YfLCrTz8KJ3QvjYjPgg"
-TOKENIZER_ID = "1RkOdhGM7BUJWr0VLyj20VwlFjT0CCzN2"
-
-# Rutas locales
-MODEL_PATH = "modelo_sentimiento.h5"
-TOKENIZER_PATH = "tokenizer.pickle"
-
-# Descargar archivo solo si no existe
+# Función para descargar archivos desde Google Drive
 def descargar_archivo_drive(file_id, output_path):
     if not os.path.exists(output_path):
-        URL = "https://drive.google.com/uc?export=download"
+        URL = f"https://drive.google.com/uc?export=download&id={file_id}"
         with requests.Session() as session:
-            response = session.get(URL, params={'id': file_id}, stream=True)
+            response = session.get(URL, stream=True)
             for key, value in response.cookies.items():
                 if key.startswith('download_warning'):
-                    response = session.get(URL, params={'id': file_id, 'confirm': value}, stream=True)
+                    response = session.get(URL, params={'confirm': value}, stream=True)
             with open(output_path, "wb") as f:
                 for chunk in response.iter_content(32768):
                     f.write(chunk)
 
-# Descargar y cargar modelo y tokenizador solo una vez
-@st.cache_resource
-def load_model():
-    descargar_archivo_drive(MODEL_ID, MODEL_PATH)
-    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-    return model
+# IDs de los modelos en Google Drive
+MODEL_PERSONAS_ID = "1ooYFg0KB5zVT3YfLCrTz8KJ3QvjYjPgg"  # Reemplaza con el ID correcto
+MODEL_PPE_ID = "1RkOdhGM7BUJWr0VLyj20VwlFjT0CCzN2"  # Reemplaza con el ID correcto
 
-@st.cache_resource
-def load_tokenizer():
-    descargar_archivo_drive(TOKENIZER_ID, TOKENIZER_PATH)
-    with open(TOKENIZER_PATH, "rb") as handle:
-        return pickle.load(handle)
+# Rutas locales donde se almacenarán los modelos descargados
+MODEL_PERSONAS_PATH = "modelo_personas.pt"
+MODEL_PPE_PATH = "modelo_ppe.pt"
 
-modelo = load_model()
-tokenizer = load_tokenizer()
+# Descargar los modelos si no existen
+if not os.path.exists(MODEL_PERSONAS_PATH):
+    descargar_archivo_drive(MODEL_PERSONAS_ID, MODEL_PERSONAS_PATH)
 
-# Respuestas aleatorias para cada sentimiento
-responses = {
-    0: [
-        "¡Parece que estás de buen ánimo! Sigue disfrutando tu día. 😊",
-        "Tu mensaje refleja una actitud positiva. ¡Sigue así! 🌟",
-        "Se nota optimismo en tus palabras. ¡Eso es genial! 💪"
-    ],
-    1: [
-        "Tu mensaje parece ser neutral, sin una emoción fuerte asociada. 🤔",
-        "No detecto un sentimiento marcado en tu mensaje. ¿Tienes algo en mente? 🧐",
-        "Parece que es un comentario equilibrado, sin inclinación emocional. 🎭"
-    ],
-    2: [
-        "Percibo que podrías estar sintiéndote mal. Si necesitas hablar, aquí estoy. 🖤",
-        "Tu mensaje suena algo negativo. Espero que todo mejore pronto. 🌧️",
-        "Parece que no estás en tu mejor día. Recuerda que todo pasa. 💙"
-    ]
-}
+if not os.path.exists(MODEL_PPE_PATH):
+    descargar_archivo_drive(MODEL_PPE_ID, MODEL_PPE_PATH)
 
-# Función para predecir el sentimiento y dar una respuesta
-def predecir_sentimiento(text):
-    # Traducir el texto de español a inglés
-    translated_text = GoogleTranslator(source='es', target='en').translate(text)
-    
-    sequence = tokenizer.texts_to_sequences([translated_text])
-    padded = pad_sequences(sequence, maxlen=100, padding="post", truncating="post")
-    prediccion = modelo.predict(padded)
-    score = prediccion[0][0]
-    
-    if score < 0.4:
-        clase = 2  # Negativo
-    elif score > 0.6:
-        clase = 0  # Positivo
-    else:
-        clase = 1  # Neutro
-    
-    return clase, random.choice(responses.get(clase, ["Error: Clase fuera de rango."]))
+# Cargar los modelos YOLO desde los archivos locales
+modelo_personas = YOLO(MODEL_PERSONAS_PATH)
+modelo_ppe = YOLO(MODEL_PPE_PATH)
 
-# UI en Streamlit sin recargar toda la página
-st.title("Análisis de Sentimiento con IA")
-texto_usuario = st.text_area("Escribe un mensaje para analizar su sentimiento:")
+# Configuración de la página
+st.set_page_config(page_title="Sistema Inteligente de uso de PPE", layout="wide")
 
-# Botón con `st.session_state` para evitar recargar la página
-if "resultado" not in st.session_state:
-    st.session_state.resultado = None
-    st.session_state.respuesta = None
+# Encabezado con logo y título
+col1, col2 = st.columns([0.1, 0.9])
+with col1:
+    st.image("logo.jpg", width=80)
+with col2:
+    st.title("Sistema Inteligente de uso de PPE")
 
-if st.button("Comprobar Sentimiento"):
-    if texto_usuario.strip():
-        sentimiento, respuesta = predecir_sentimiento(texto_usuario)
-        st.session_state.resultado = ['Positivo', 'Neutro', 'Negativo'][sentimiento]
-        st.session_state.respuesta = respuesta
-    else:
-        st.session_state.resultado = None
-        st.session_state.respuesta = "Por favor, escribe un mensaje para analizar."
+# Introducción
+st.markdown("""
+Bienvenido al **Sistema Inteligente de uso de Equipos de Protección Personal (PPE)**.  
+Esta herramienta utiliza visión por computadora para verificar si las personas están utilizando el equipo de protección necesario (casco, chaleco y botas) antes de ingresar a una fábrica.
 
-# Mostrar resultado sin refrescar la página
-if st.session_state.resultado:
-    st.write(f"**Resultado:** {st.session_state.resultado}")
-    st.write(f"**Respuesta:** {st.session_state.respuesta}")
+---  
+""")
+
+# Instrucciones
+st.subheader("📌 Instrucciones de uso")
+st.markdown("""
+1. Elige una opción: cargar una imagen o tomar una foto.  
+2. Presiona el botón **Enviar Foto**.  
+3. El sistema detectará personas y evaluará el uso correcto del equipo de protección personal (PPE).  
+""")
+
+# Tabs para seleccionar entre carga y cámara
+tab1, tab2 = st.tabs(["📁 Subir Imagen", "📷 Tomar Foto"])
+
+# Variables para imagen y bandera de envío
+imagen_original = None
+procesar = False
+
+with tab1:
+    foto = st.file_uploader("Sube una imagen", type=["jpg", "png", "jpeg"])
+    if st.button("📤 Enviar Foto", key="upload"):
+        if foto:
+            imagen_original = Image.open(foto)
+            procesar = True
+        else:
+            st.warning("Por favor, sube una imagen antes de enviar.")
+
+with tab2:
+    captura = st.camera_input("Captura una foto")
+    if st.button("📤 Enviar Foto", key="camera"):
+        if captura:
+            imagen_original = Image.open(captura)
+            procesar = True
+        else:
+            st.warning("Por favor, toma una foto antes de enviar.")
+
+# Procesamiento si hay imagen
+if procesar and imagen_original:
+    st.subheader("🔍 Imagen cargada")
+    st.image(imagen_original, use_container_width=True)
+
+    # Convertir imagen a formato OpenCV
+    img_cv = np.array(imagen_original)
+    img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+
+    # Detección de personas
+    resultados_personas = modelo_personas(img_cv)[0]
+    personas_detectadas = [r for r in resultados_personas.boxes.data.cpu().numpy() if int(r[5]) == 0]
+
+    st.subheader(f"👥 Personas detectadas: {len(personas_detectadas)}")
+
+    # Evaluar cada persona
+    for i, persona in enumerate(personas_detectadas, start=1):
+        x1, y1, x2, y2, conf, clase = map(int, persona[:6])
+        persona_img = img_cv[y1:y2, x1:x2]
+
+        # Guardar temporalmente
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            cv2.imwrite(temp_file.name, persona_img)
+
+            # Aplicar modelo PPE
+            resultados_ppe = modelo_ppe(temp_file.name)[0]
+            etiquetas_detectadas = [modelo_ppe.names[int(d.cls)] for d in resultados_ppe.boxes]
+
+            # Dibujar bounding boxes
+            for box in resultados_ppe.boxes:
+                x1o, y1o, x2o, y2o = map(int, box.xyxy[0])
+                label = modelo_ppe.names[int(box.cls[0])]
+                conf = float(box.conf[0])
+                cv2.rectangle(persona_img, (x1o, y1o), (x2o, y2o), (0, 255, 0), 2)
+                cv2.putText(persona_img, f"{label} {conf:.2f}", (x1o, y1o - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # Mostrar imagen con objetos detectados
+            st.markdown(f"### 👤 Persona {i}")
+            st.image(persona_img, caption="Objetos detectados en la persona", channels="BGR", width=300)
+            st.markdown("**Objetos detectados:** " + ", ".join(etiquetas_detectadas))
+
+            # Verificación de cumplimiento
+            requeridos = {"casco", "chaleco", "botas"}
+            presentes = set(etiquetas_detectadas)
+
+            if requeridos.issubset(presentes):
+                st.success("✅ Cumple con los requisitos para el ingreso a la fábrica 🏭")
+            else:
+                faltantes = requeridos - presentes
+                st.error(f"🚨 ALERTA: No cumple con los requisitos del PPE. Faltan: {', '.join(faltantes)}")
+
+    st.markdown("---")
+    st.markdown("**Autor: Alfredo Díaz**  \nUnab 2025! ©️")
